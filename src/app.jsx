@@ -1,611 +1,817 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
-const G = () => (
+// ─────────────────────────────────────────────────────────────────────────────
+// 🔧 YOUR GOOGLE SHEET PUBLISHED ID (already connected!)
+// ─────────────────────────────────────────────────────────────────────────────
+const PUB_ID = "2PACX-1vTpMWkq6AnKS7pIo-FxBaZk0Rmlf6ISWdWD97NALqGXOIGDrJeDGm6ATl28ywzvrafLMIon30ob4J9F";
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SHEETS = ["mines","acquisition","upcoming_acquisition","possession","eoffice","house","rti","legal","events"];
+
+const csvUrl = (sheet) =>
+  `https://docs.google.com/spreadsheets/d/e/${PUB_ID}/pub?output=csv&sheet=${sheet}`;
+
+const parseCSV = (text) => {
+  const lines = text.trim().split("\n");
+  const headers = lines[0].split(",").map(h => h.replace(/"/g,"").trim());
+  return lines.slice(1).map(line => {
+    const vals = [];
+    let cur = "", inQ = false;
+    for (let ch of line) {
+      if (ch==='"') inQ=!inQ;
+      else if (ch===',' && !inQ) { vals.push(cur.trim()); cur=""; }
+      else cur+=ch;
+    }
+    vals.push(cur.trim());
+    return Object.fromEntries(headers.map((h,i)=>[h, vals[i]||""]));
+  }).filter(r => Object.values(r).some(v=>v!==""));
+};
+
+// ── THEMES ────────────────────────────────────────────────────────────────────
+const DARK = {
+  pageBg:    "#080c14",
+  headerBg:  "#0a0f1a",
+  headerBdr: "#111a27",
+  panelBg:   "#0f1623",
+  panelBdr:  "#1e2d45",
+  circleBg1: "#0f1623",
+  circleBg2: "#080c14",
+  kpiBg:     "#080c14",
+  kpiBdr:    "#1a2535",
+  tableBdr:  "#111a27",
+  tableHdr:  "#1a2535",
+  tableHov:  "rgba(30,60,100,0.25)",
+  thColor:   "#3a5a7a",
+  tdColor:   "#c8d8e8",
+  labelColor:"#8aa0bc",
+  subColor:  "#4a6080",
+  titleColor:"#e2eaf4",
+  accentBlue:"#2d5a8e",
+  dividerBg: "#1e3a5f",
+  scrollThumb:"#1e3a5f",
+  btnBdr:    "#1e2d45",
+  btnColor:  "#4a6080",
+  toggleBg:  "#0f1623",
+  toggleBdr: "#1e2d45",
+  toggleIcon:"🌙",
+  toggleLabel:"Light Mode",
+};
+const LIGHT = {
+  pageBg:    "#f0f4f8",
+  headerBg:  "#ffffff",
+  headerBdr: "#dde6f0",
+  panelBg:   "#ffffff",
+  panelBdr:  "#ccd8e8",
+  circleBg1: "#ffffff",
+  circleBg2: "#f0f4f8",
+  kpiBg:     "#f8fafc",
+  kpiBdr:    "#dde6f0",
+  tableBdr:  "#e8eef4",
+  tableHdr:  "#eef3f8",
+  tableHov:  "rgba(59,130,246,0.06)",
+  thColor:   "#6b8aaa",
+  tdColor:   "#1e3a5f",
+  labelColor:"#4a6a8a",
+  subColor:  "#7a9ab8",
+  titleColor:"#0f2a4a",
+  accentBlue:"#2563eb",
+  dividerBg: "#bcd4ea",
+  scrollThumb:"#93c5fd",
+  btnBdr:    "#ccd8e8",
+  btnColor:  "#4a6a8a",
+  toggleBg:  "#ffffff",
+  toggleBdr: "#ccd8e8",
+  toggleIcon:"☀️",
+  toggleLabel:"Dark Mode",
+};
+
+const G = ({t}) => (
   <style>{`
-    @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@700;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
     *{box-sizing:border-box;margin:0;padding:0;}
-    ::-webkit-scrollbar{width:3px;height:3px;}
-    ::-webkit-scrollbar-thumb{background:#334155;border-radius:2px;}
-    .card{background:#0d0d1a;border:1px solid #1e1e30;border-radius:6px;}
-    .cl:hover{border-color:#3b82f6!important;cursor:pointer;box-shadow:0 0 0 1px #3b82f620;}
-    .rh:hover{background:rgba(255,255,255,0.03)!important;cursor:pointer;}
-    .badge{display:inline-block;padding:2px 8px;border-radius:2px;font-size:10px;font-weight:600;letter-spacing:0.04em;}
-    .sec-title{font-size:9px;letter-spacing:0.22em;text-transform:uppercase;margin-bottom:14px;display:flex;align-items:center;gap:8px;}
-    .sec-title::after{content:'';flex:1;height:1px;background:currentColor;opacity:0.15;}
-    .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:100;display:flex;align-items:center;justify-content:center;padding:20px;}
-    .modal{background:#0d0d1a;border:1px solid #334155;border-radius:8px;padding:28px;width:560px;max-width:100%;max-height:90vh;overflow-y:auto;}
-    th{padding:7px 10px;text-align:left;font-size:8px;color:#475569;letter-spacing:0.09em;text-transform:uppercase;font-weight:500;}
-    td{padding:9px 10px;border-bottom:1px solid #111120;font-size:11px;}
+    body{background:${t.pageBg};}
+    .overlay{position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:50;display:flex;align-items:center;justify-content:center;padding:24px;}
+    .panel{background:${t.panelBg};border:1px solid ${t.panelBdr};border-radius:16px;width:860px;max-width:96vw;max-height:90vh;overflow-y:auto;padding:28px;}
+    .panel::-webkit-scrollbar{width:4px;}
+    .panel::-webkit-scrollbar-thumb{background:${t.scrollThumb};border-radius:2px;}
+    table{width:100%;border-collapse:collapse;font-size:12px;}
+    th{padding:7px 12px;text-align:left;font-size:9px;color:${t.thColor};letter-spacing:0.09em;text-transform:uppercase;border-bottom:1px solid ${t.tableHdr};font-weight:600;}
+    td{padding:9px 12px;color:${t.tdColor};border-bottom:1px solid ${t.tableBdr};font-size:12px;}
     tr:last-child td{border-bottom:none;}
+    tr:hover td{background:${t.tableHov};}
+    .badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600;}
+    .cc{cursor:pointer;transition:transform 0.18s;}
+    .cc:hover{transform:scale(1.06);}
+    .back-btn{background:transparent;border:1px solid ${t.btnBdr};color:${t.btnColor};padding:5px 14px;border-radius:8px;cursor:pointer;font-family:Inter,sans-serif;font-size:11px;transition:all 0.15s;}
+    .back-btn:hover{border-color:#3b82f6;color:#3b82f6;}
+    .kpi{background:${t.kpiBg};border:1px solid ${t.kpiBdr};border-radius:10px;padding:12px;text-align:center;}
+    .toggle-btn{position:fixed;bottom:24px;left:24px;z-index:200;display:flex;align-items:center;gap:8px;padding:9px 16px;background:${t.toggleBg};border:1px solid ${t.toggleBdr};border-radius:50px;cursor:pointer;font-family:Inter,sans-serif;font-size:12px;font-weight:600;color:${t.btnColor};box-shadow:0 4px 16px rgba(0,0,0,0.15);transition:all 0.2s;}
+    .toggle-btn:hover{border-color:#3b82f6;color:#3b82f6;transform:translateY(-1px);box-shadow:0 6px 20px rgba(59,130,246,0.2);}
   `}</style>
 );
 
-// ── DATA ──────────────────────────────────────────────────────────────────────
-
-const MINES = [
-  { id:"ARG-01", name:"Argada Main OCP" },
-  { id:"ARG-02", name:"Argada East UG" },
-  { id:"ARG-03", name:"Argada North Extension" },
-  { id:"ARG-04", name:"Argada South OCP" },
-];
-
-const ACQ = [
-  { mineId:"ARG-01", total:248.6, done:189.2, plots:[
-    {no:"PLT-101",village:"Argada Village",area:12.4,status:"Pending",reason:"Court Stay",owner:"Ramesh Mahato"},
-    {no:"PLT-102",village:"Argada Village",area:8.7,status:"Pending",reason:"Compensation Dispute",owner:"Sunita Devi"},
-    {no:"PLT-103",village:"Sirka Tola",area:15.2,status:"Pending",reason:"Survey Pending",owner:"Govt. Land"},
-    {no:"PLT-104",village:"Sirka Tola",area:22.9,status:"Done",reason:"—",owner:"CCL"},
-    {no:"PLT-105",village:"Bhurkunda",area:0.2,status:"Pending",reason:"Legal Notice Stage",owner:"Binod Singh"},
-  ]},
-  { mineId:"ARG-02", total:94.3, done:94.3, plots:[
-    {no:"PLT-201",village:"Kuju",area:18.1,status:"Done",reason:"—",owner:"CCL"},
-    {no:"PLT-202",village:"Kuju",area:11.4,status:"Done",reason:"—",owner:"CCL"},
-  ]},
-  { mineId:"ARG-03", total:176.0, done:88.5, plots:[
-    {no:"PLT-301",village:"Ramgarh Tola",area:30.2,status:"Pending",reason:"Tribal Land — Forest Clearance",owner:"Tribal Community"},
-    {no:"PLT-302",village:"Ramgarh Tola",area:19.8,status:"Pending",reason:"Compensation Dispute",owner:"Lakhan Oraon"},
-    {no:"PLT-303",village:"Chadwa",area:17.5,status:"Done",reason:"—",owner:"CCL"},
-    {no:"PLT-304",village:"Chadwa",area:20.0,status:"Pending",reason:"Court Stay",owner:"Mangra Devi"},
-  ]},
-  { mineId:"ARG-04", total:132.4, done:101.9, plots:[
-    {no:"PLT-401",village:"Hesla",area:14.2,status:"Pending",reason:"Survey Pending",owner:"Suresh Yadav"},
-    {no:"PLT-402",village:"Hesla",area:16.3,status:"Done",reason:"—",owner:"CCL"},
-    {no:"PLT-403",village:"Bero",area:0.0,status:"Pending",reason:"Compensation Dispute",owner:"Geeta Kumari"},
-  ]},
-];
-
-const POS = [
-  { mineId:"ARG-01", total:248.6, done:142.8, plots:[
-    {no:"PLT-101",village:"Argada Village",area:12.4,status:"Pending",reason:"Crop Compensation Due",date:"—"},
-    {no:"PLT-104",village:"Sirka Tola",area:22.9,status:"Done",reason:"—",date:"12 Jan 2025"},
-    {no:"PLT-106",village:"Bhurkunda",area:31.5,status:"Pending",reason:"Encroachment",date:"—"},
-  ]},
-  { mineId:"ARG-02", total:94.3, done:74.1, plots:[
-    {no:"PLT-201",village:"Kuju",area:18.1,status:"Done",reason:"—",date:"03 Mar 2024"},
-    {no:"PLT-202",village:"Kuju",area:11.4,status:"Pending",reason:"Structure Demolition Pending",date:"—"},
-  ]},
-  { mineId:"ARG-03", total:176.0, done:60.0, plots:[
-    {no:"PLT-303",village:"Chadwa",area:17.5,status:"Done",reason:"—",date:"19 Sep 2024"},
-    {no:"PLT-305",village:"Ramgarh Tola",area:28.0,status:"Pending",reason:"Village Resistance",date:"—"},
-  ]},
-  { mineId:"ARG-04", total:132.4, done:101.9, plots:[
-    {no:"PLT-402",village:"Hesla",area:16.3,status:"Done",reason:"—",date:"07 Jun 2024"},
-    {no:"PLT-401",village:"Hesla",area:14.2,status:"Pending",reason:"Key Handover Pending",date:"—"},
-  ]},
-];
-
-const EOFFICE = [
-  {id:"EOF-2024-1142",subject:"Award Declaration — Argada Village Plot 101-105",desk:"DGM (L&R) — Pending Signature",stage:"Awaiting DGM Approval",bottleneck:"DGM on leave — delayed 12 days",mineId:"ARG-01",priority:"High",days:34,by:"Sr. Manager L&R",next:"Follow up with DGM office"},
-  {id:"EOF-2024-0987",subject:"Forest Land Clearance — Ramgarh Tola Block",desk:"MoEF Liaison Officer",stage:"State Forest Dept Review",bottleneck:"State Forest Dept response awaited since 45 days",mineId:"ARG-03",priority:"Critical",days:62,by:"Manager (Env)",next:"Send reminder to PCCF Jharkhand"},
-  {id:"EOF-2024-1201",subject:"Compensation Payment Auth — Hesla Village",desk:"Finance Dept — Accounts Section",stage:"Fund Release Pending",bottleneck:"Budget head mismatch — returned for correction",mineId:"ARG-04",priority:"Medium",days:18,by:"Sr. Manager L&R",next:"Re-submit with correct budget head"},
-  {id:"EOF-2025-0023",subject:"SIA Report Submission — Argada North Extension",desk:"CMD Secretariat",stage:"CMD Review",bottleneck:"CMD review scheduled for next board meeting",mineId:"ARG-03",priority:"High",days:9,by:"GM (L&R)",next:"Confirm board meeting date"},
-  {id:"EOF-2024-1098",subject:"R&R Plan Approval — Bhurkunda Displacement",desk:"Dist. Collector Office",stage:"DC Review & NOC",bottleneck:"DC requested additional survey data",mineId:"ARG-01",priority:"Critical",days:51,by:"Manager L&R",next:"Submit additional survey by 30 Apr"},
-  {id:"EOF-2025-0041",subject:"Possession Notice — Kuju Plots 201-202",desk:"Tehsildar Office",stage:"Section 11 Notice Issued",bottleneck:"None — on track",mineId:"ARG-02",priority:"Low",days:5,by:"Sr. Manager L&R",next:"Await 30-day notice period"},
-  {id:"EOF-2024-1315",subject:"Tribal Land Acquisition — Ramgarh Tola",desk:"Tribal Welfare Dept",stage:"FPIC Process Ongoing",bottleneck:"Gram Sabha consent pending — 2nd meeting scheduled",mineId:"ARG-03",priority:"Critical",days:78,by:"GM (L&R)",next:"Coordinate Gram Sabha on 05 May 2025"},
-];
-
-const HOUSE = [
-  {mineId:"ARG-01",mineName:"Argada Main OCP",structures:[
-    {id:"STR-001",owner:"Ramesh Mahato",village:"Argada Village",type:"Pucca House",rooms:4,area:820,amount:18.4,status:"Pending",due:"15 May 2025",reason:"Valuation Dispute"},
-    {id:"STR-002",owner:"Sunita Devi",village:"Argada Village",type:"Semi-Pucca",rooms:2,area:420,amount:7.2,status:"Pending",due:"15 May 2025",reason:"Document Incomplete"},
-    {id:"STR-003",owner:"Birsa Munda",village:"Sirka Tola",type:"Kuccha House",rooms:3,area:310,amount:3.8,status:"Paid",due:"Paid 12 Jan 2025",reason:"—"},
-    {id:"STR-004",owner:"Govt. Structure",village:"Sirka Tola",type:"Community Hall",rooms:1,area:1200,amount:42.0,status:"Pending",due:"30 Jun 2025",reason:"Inter-dept Approval"},
-  ]},
-  {mineId:"ARG-02",mineName:"Argada East UG",structures:[
-    {id:"STR-101",owner:"Laxman Singh",village:"Kuju",type:"Pucca House",rooms:3,area:640,amount:14.1,status:"Paid",due:"Paid 03 Mar 2024",reason:"—"},
-    {id:"STR-102",owner:"Meena Devi",village:"Kuju",type:"Semi-Pucca",rooms:2,area:380,amount:6.5,status:"Pending",due:"30 Apr 2025",reason:"Structure Demolition Pending"},
-  ]},
-  {mineId:"ARG-03",mineName:"Argada North Extension",structures:[
-    {id:"STR-201",owner:"Lakhan Oraon",village:"Ramgarh Tola",type:"Pucca House",rooms:5,area:940,amount:21.8,status:"Pending",due:"01 Jun 2025",reason:"Tribal Land — Legal Hold"},
-    {id:"STR-202",owner:"Tribal Community",village:"Ramgarh Tola",type:"Community Hut",rooms:1,area:280,amount:2.4,status:"Pending",due:"01 Jun 2025",reason:"Gram Sabha Consent Pending"},
-    {id:"STR-203",owner:"Mangra Devi",village:"Chadwa",type:"Kuccha House",rooms:2,area:250,amount:2.9,status:"Pending",due:"30 Apr 2025",reason:"Court Stay"},
-  ]},
-  {mineId:"ARG-04",mineName:"Argada South OCP",structures:[
-    {id:"STR-301",owner:"Suresh Yadav",village:"Hesla",type:"Pucca House",rooms:4,area:720,amount:16.2,status:"Pending",due:"30 Apr 2025",reason:"Survey Pending"},
-    {id:"STR-302",owner:"Geeta Kumari",village:"Bero",type:"Semi-Pucca",rooms:2,area:390,amount:7.0,status:"Paid",due:"Paid 07 Jun 2024",reason:"—"},
-  ]},
-];
-
-const RTI = [
-  {id:"RTI-2024-0341",applicant:"Suresh Kumar Mahato",subject:"Land acquisition compensation details — Argada Village",mineId:"ARG-01",received:"28 Feb 2025",deadline:"28 Mar 2025",status:"Overdue",daysLeft:-30,action:"Draft reply immediately — overdue by 30 days"},
-  {id:"RTI-2024-0378",applicant:"Tribal Welfare Society",subject:"Status of Forest Clearance — Ramgarh Tola",mineId:"ARG-03",received:"10 Mar 2025",deadline:"09 Apr 2025",status:"Overdue",daysLeft:-18,action:"Coordinate with MoEF — reply pending"},
-  {id:"RTI-2025-0012",applicant:"Lakhan Oraon",subject:"R&R entitlement details for Ramgarh displaced families",mineId:"ARG-03",received:"01 Apr 2025",deadline:"30 Apr 2025",status:"Due Soon",daysLeft:3,action:"Compile R&R data — reply by 30 Apr"},
-  {id:"RTI-2025-0019",applicant:"Ramgarh Jan Kalyan",subject:"House compensation amounts paid and pending",mineId:"ARG-01",received:"05 Apr 2025",deadline:"04 May 2025",status:"Pending",daysLeft:7,action:"Prepare compensation statement"},
-  {id:"RTI-2025-0024",applicant:"Meena Devi",subject:"Possession notice status — Kuju Plot 202",mineId:"ARG-02",received:"12 Apr 2025",deadline:"11 May 2025",status:"Pending",daysLeft:14,action:"Reply with current status"},
-  {id:"RTI-2025-0031",applicant:"Advocate S.K. Sinha",subject:"eOffice file status — award declaration",mineId:"ARG-01",received:"18 Apr 2025",deadline:"17 May 2025",status:"Pending",daysLeft:20,action:"Share file movement details"},
-];
-
 // ── HELPERS ───────────────────────────────────────────────────────────────────
+const StatusBadge = ({s=""}) => {
+  const map = {Overdue:["#3d0f0f","#f87171"],Urgent:["#3d0f0f","#f87171"],"Due Soon":["#3d1f0f","#fb923c"],
+    Pending:["#0f1f3d","#60a5fa"],Paid:["#0f3d1f","#4ade80"],Done:["#0f3d1f","#4ade80"],
+    Low:["#0f3d1f","#4ade80"],High:["#3d1f0f","#fb923c"],Critical:["#3d0f0f","#f87171"],Medium:["#2d2d0f","#facc15"]};
+  const [bg,fg] = map[s]||["#1e2535","#94a3b8"];
+  return <span className="badge" style={{background:bg,color:fg}}>{s||"—"}</span>;
+};
 
-const pct = (a,b) => b ? Math.round((a/b)*100) : 0;
-
-const Bar = ({done,total,color,h=5}) => (
-  <div style={{height:h,background:"#1e1e2e",borderRadius:2,overflow:"hidden"}}>
-    <div style={{height:"100%",width:`${pct(done,total)}%`,background:color,borderRadius:2,transition:"width 0.8s"}}/>
+const KPI = ({l,v,c="#e2eaf4",t}) => (
+  <div className="kpi">
+    <div style={{fontSize:9,color:t.subColor,marginBottom:4,textTransform:"uppercase",letterSpacing:"0.1em",lineHeight:1.3}}>{l}</div>
+    <div style={{fontSize:18,fontWeight:700,color:c,lineHeight:1.2}}>{v}</div>
   </div>
 );
 
-const Ring = ({done,total,size=80,stroke=8,color}) => {
-  const r=(size-stroke)/2, c=2*Math.PI*r, f=total?(done/total)*c:0;
-  return (
-    <svg width={size} height={size} style={{transform:"rotate(-90deg)",flexShrink:0}}>
-      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#1e1e2e" strokeWidth={stroke}/>
-      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={stroke}
-        strokeDasharray={`${f} ${c}`} strokeLinecap="round"/>
-    </svg>
-  );
-};
-
-const priC = {Critical:["#2d0f0f","#f87171"],High:["#2d1a0f","#fb923c"],Medium:["#1a1a0f","#facc15"],Low:["#0f2d1a","#4ade80"]};
-const rtiC = {Overdue:["#2d0f0f","#f87171"],"Due Soon":["#2d1a0f","#fb923c"],Pending:["#0f1a2d","#60a5fa"]};
-
-const Divider = ({label,color="#94a3b8",icon}) => (
-  <div style={{display:"flex",alignItems:"center",gap:10,margin:"28px 0 18px"}}>
-    <div style={{width:3,height:22,background:color,borderRadius:2}}/>
-    <span style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:800,color:"#fff"}}>{icon} {label}</span>
-    <div style={{flex:1,height:1,background:"#1e1e30"}}/>
+// ── CIRCLE ────────────────────────────────────────────────────────────────────
+const Circle = ({icon,label,value,sub,color="#22c55e",alert,onClick,size=168,t}) => (
+  <div className="cc" onClick={onClick} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:0}}>
+    <div style={{position:"relative",width:size,height:size,borderRadius:"50%",
+      background:`conic-gradient(${color} 0deg,${color}22 360deg)`,padding:4,
+      boxShadow:`0 0 28px ${color}28,0 0 6px ${color}18`}}>
+      <div style={{width:"100%",height:"100%",borderRadius:"50%",
+        background:`linear-gradient(145deg,${t.circleBg1},${t.circleBg2})`,
+        border:`1.5px solid ${color}40`,
+        display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2}}>
+        {icon && <div style={{fontSize:Math.round(size*0.15),lineHeight:1}}>{icon}</div>}
+        <div style={{fontSize:Math.round(size*0.17),fontWeight:800,color,lineHeight:1.1,textAlign:"center",padding:"0 8px"}}>{value}</div>
+        {sub && <div style={{fontSize:9,color:t.subColor,textAlign:"center",padding:"0 10px",lineHeight:1.3}}>{sub}</div>}
+        {alert && <div style={{fontSize:9,color:"#f87171",fontWeight:700,marginTop:1}}>{alert}</div>}
+      </div>
+    </div>
+    <div style={{marginTop:10,fontSize:12,fontWeight:600,color:t.labelColor,textAlign:"center"}}>{label}</div>
+    <div style={{fontSize:9,color:`${color}80`,marginTop:2}}>tap for details</div>
   </div>
 );
 
-const KPI = ({label,value,color,sub}) => (
-  <div className="card" style={{padding:"14px 16px",textAlign:"center"}}>
-    <div style={{fontSize:8,color:"#64748b",letterSpacing:"0.1em",marginBottom:4}}>{label}</div>
-    <div style={{fontSize:22,fontWeight:700,color,fontFamily:"'Syne',sans-serif",lineHeight:1}}>{value}</div>
-    {sub && <div style={{fontSize:9,color:"#475569",marginTop:4}}>{sub}</div>}
+// ── PANEL WRAPPER ─────────────────────────────────────────────────────────────
+const Panel = ({title,icon,color,onClose,children,t}) => (
+  <div className="overlay" onClick={onClose}>
+    <div className="panel" onClick={e=>e.stopPropagation()}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:22}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:4,height:26,background:color,borderRadius:2}}/>
+          <span style={{fontSize:20}}>{icon}</span>
+          <span style={{fontSize:18,fontWeight:700,color:t.titleColor,fontFamily:"Inter"}}>{title}</span>
+        </div>
+        <button className="back-btn" onClick={onClose}>✕ Close</button>
+      </div>
+      {children}
+    </div>
   </div>
 );
 
-// ── MODALS ────────────────────────────────────────────────────────────────────
+// ── LOADING ───────────────────────────────────────────────────────────────────
+const Spinner = () => (
+  <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",gap:16}}>
+    <div style={{width:48,height:48,border:"3px solid #1e2d45",borderTop:"3px solid #3b82f6",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+    <div style={{color:"#3a5a7a",fontSize:13}}>Loading dashboard data...</div>
+    <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+  </div>
+);
 
-const AcqModal = ({mine, data, onClose}) => {
-  const pending = data.plots.filter(p=>p.status==="Pending");
-  const done = data.plots.filter(p=>p.status==="Done");
+const ErrBox = ({msg}) => (
+  <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",gap:12}}>
+    <div style={{color:"#f87171",fontSize:16,fontWeight:700}}>⚠️ Could not load data</div>
+    <div style={{color:"#4a6080",fontSize:12,maxWidth:400,textAlign:"center"}}>{msg}</div>
+    <div style={{color:"#3a5a7a",fontSize:11}}>Make sure your Google Sheet is published to the web (File → Share → Publish to web)</div>
+  </div>
+);
+
+// ── LIVE CLOCK ────────────────────────────────────────────────────────────────
+const LiveClock = ({t}) => {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => { const id = setInterval(()=>setNow(new Date()),1000); return ()=>clearInterval(id); },[]);
+  const days   = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+  const months = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const hh = String(now.getHours()).padStart(2,"0");
+  const mm = String(now.getMinutes()).padStart(2,"0");
+  const ss = String(now.getSeconds()).padStart(2,"0");
   return (
-    <div className="modal-bg" onClick={onClose}>
-      <div className="modal" onClick={e=>e.stopPropagation()}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-          <div>
-            <div style={{fontSize:9,color:"#22c55e",letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:4}}>Acquisition Detail</div>
-            <div style={{fontSize:18,fontFamily:"'Syne',sans-serif",fontWeight:800,color:"#fff"}}>{mine.name}</div>
-          </div>
-          <button onClick={onClose} style={{background:"transparent",border:"1px solid #2d2d3d",color:"#94a3b8",padding:"4px 12px",borderRadius:3,cursor:"pointer",fontFamily:"inherit",fontSize:11}}>✕ Close</button>
+    <div style={{textAlign:"right"}}>
+      <div style={{fontSize:28,fontWeight:800,color:"#3b82f6",fontFamily:"Inter",letterSpacing:"0.04em",lineHeight:1}}>
+        {hh}<span style={{opacity:0.5,animation:"blink 1s step-end infinite"}}>:</span>{mm}
+        <span style={{fontSize:16,color:t.subColor,marginLeft:4}}>{ss}s</span>
+      </div>
+      <div style={{fontSize:11,color:t.subColor,marginTop:3}}>
+        {days[now.getDay()]} · {now.getDate()} {months[now.getMonth()]} {now.getFullYear()}
+      </div>
+      <div style={{fontSize:9,color:"#22c55e",marginTop:1}}>● Live from Google Sheets · FY 2025–26</div>
+      <style>{`@keyframes blink{0%,100%{opacity:0.5}50%{opacity:1}}`}</style>
+    </div>
+  );
+};
+
+// ── CALENDAR WIDGET ────────────────────────────────────────────────────────────
+const CAT_COLORS = {
+  Meeting:    "#3b82f6",
+  Inspection: "#22c55e",
+  Deadline:   "#ef4444",
+  Court:      "#f97316",
+  Other:      "#a855f7",
+};
+
+const CalendarWidget = ({t, sheetEvents}) => {
+  const today      = new Date();
+  const [curMonth, setCurMonth] = useState(today.getMonth());
+  const [curYear,  setCurYear]  = useState(today.getFullYear());
+  const [open,     setOpen]     = useState(false);
+  const [popupDay, setPopupDay] = useState(null);
+
+  const months = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const DAYS   = ["Su","Mo","Tu","We","Th","Fr","Sa"];
+
+  const firstDay    = new Date(curYear, curMonth, 1).getDay();
+  const daysInMonth = new Date(curYear, curMonth+1, 0).getDate();
+  const todayStr    = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`;
+
+  const dateStr = (d) => `${curYear}-${String(curMonth+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+
+  // Build events map from sheet: { "YYYY-MM-DD": [{title,note,category},...] }
+  const eventsMap = {};
+  (sheetEvents||[]).forEach(r => {
+    const key = (r.date||"").trim();
+    if (!key) return;
+    if (!eventsMap[key]) eventsMap[key] = [];
+    eventsMap[key].push({ title: r.title||"", note: r.note||"", category: r.category||"Other" });
+  });
+
+  const todayEvents = eventsMap[todayStr] || [];
+  const totalEvents = Object.keys(eventsMap).length;
+
+  const prevMonth = () => { if(curMonth===0){setCurMonth(11);setCurYear(y=>y-1);}else setCurMonth(m=>m-1); };
+  const nextMonth = () => { if(curMonth===11){setCurMonth(0);setCurYear(y=>y+1);}else setCurMonth(m=>m+1); };
+
+  const CalBtn = () => (
+    <div onClick={()=>setOpen(o=>!o)} style={{
+      position:"fixed", bottom:24, right:24, zIndex:200,
+      width:52, height:52, borderRadius:"50%",
+      background:t.toggleBg, border:`1px solid ${t.toggleBdr}`,
+      display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
+      cursor:"pointer", boxShadow:"0 4px 16px rgba(0,0,0,0.18)", transition:"all 0.2s",
+    }}>
+      <div style={{fontSize:22}}>📅</div>
+      {totalEvents>0 && (
+        <div style={{position:"absolute",top:4,right:4,width:10,height:10,
+          borderRadius:"50%",background:"#3b82f6",border:`2px solid ${t.pageBg}`}}/>
+      )}
+      {todayEvents.length>0 && (
+        <div style={{position:"absolute",top:-2,left:-2,width:16,height:16,borderRadius:"50%",
+          background:"#ef4444",border:`2px solid ${t.pageBg}`,fontSize:9,color:"#fff",
+          display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700}}>
+          {todayEvents.length}
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:16}}>
-          {[{l:"Total",v:`${data.total.toFixed(1)} Ha`,c:"#e2e8f0"},{l:"Acquired",v:`${data.done.toFixed(1)} Ha`,c:"#22c55e"},{l:"Pending",v:`${(data.total-data.done).toFixed(1)} Ha`,c:"#ef4444"}].map((s,i)=>(
-            <div key={i} style={{background:"#060610",border:"1px solid #1e1e30",borderRadius:4,padding:"10px",textAlign:"center"}}>
-              <div style={{fontSize:8,color:"#64748b",marginBottom:3}}>{s.l}</div>
-              <div style={{fontSize:16,fontWeight:700,color:s.c,fontFamily:"'Syne',sans-serif"}}>{s.v}</div>
+      )}
+    </div>
+  );
+
+  if (!open) return (
+    <>
+      <CalBtn/>
+      {todayEvents.length>0 && (
+        <div style={{position:"fixed",bottom:90,right:24,zIndex:190,
+          background:t.panelBg,border:"1px solid #3b82f6",borderRadius:12,
+          padding:"14px 18px",boxShadow:"0 8px 32px rgba(59,130,246,0.2)",
+          maxWidth:280,animation:"slideUp 0.3s ease"}}>
+          <div style={{fontSize:10,color:"#3b82f6",letterSpacing:"0.12em",
+            textTransform:"uppercase",marginBottom:8,fontWeight:600}}>📅 Today's Events</div>
+          {todayEvents.map((e,i)=>(
+            <div key={i} style={{padding:"6px 0",borderBottom:i<todayEvents.length-1?`1px solid ${t.tableBdr}`:"none"}}>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2}}>
+                <div style={{width:7,height:7,borderRadius:"50%",background:CAT_COLORS[e.category]||"#3b82f6",flexShrink:0}}/>
+                <div style={{fontSize:12,fontWeight:600,color:t.titleColor}}>{e.title}</div>
+              </div>
+              {e.note && <div style={{fontSize:11,color:t.subColor,paddingLeft:13}}>{e.note}</div>}
+              <div style={{fontSize:10,color:CAT_COLORS[e.category]||"#3b82f6",paddingLeft:13,marginTop:2}}>{e.category}</div>
             </div>
           ))}
+          <div style={{marginTop:10,fontSize:9,color:t.subColor,borderTop:`1px solid ${t.tableBdr}`,paddingTop:8}}>
+            To add/edit events → update <span style={{color:"#3b82f6",fontWeight:600}}>events</span> sheet in Google Sheets
+          </div>
+          <style>{`@keyframes slideUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}`}</style>
         </div>
-        {pending.length > 0 && <>
-          <div style={{fontSize:9,color:"#ef4444",letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:10,marginTop:16}}>⏳ Pending Plots ({pending.length})</div>
-          <table style={{width:"100%",borderCollapse:"collapse",marginBottom:16}}>
-            <thead><tr style={{borderBottom:"1px solid #1e1e30"}}>{["Plot","Village","Area","Reason","Owner"].map(h=><th key={h}>{h}</th>)}</tr></thead>
-            <tbody>{pending.map((p,i)=><tr key={i}>
-              <td style={{color:"#ef4444",fontWeight:700}}>{p.no}</td>
-              <td style={{color:"#e2e8f0"}}>{p.village}</td>
-              <td style={{color:"#94a3b8"}}>{p.area} Ha</td>
-              <td><span className="badge" style={{background:"#2d1010",color:"#f87171"}}>{p.reason}</span></td>
-              <td style={{color:"#94a3b8"}}>{p.owner}</td>
-            </tr>)}</tbody>
-          </table>
-        </>}
-        {done.length > 0 && <>
-          <div style={{fontSize:9,color:"#22c55e",letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:10}}>✅ Acquired ({done.length})</div>
-          <table style={{width:"100%",borderCollapse:"collapse"}}>
-            <thead><tr style={{borderBottom:"1px solid #1e1e30"}}>{["Plot","Village","Area","Owner"].map(h=><th key={h}>{h}</th>)}</tr></thead>
-            <tbody>{done.map((p,i)=><tr key={i}>
-              <td style={{color:"#22c55e",fontWeight:700}}>{p.no}</td>
-              <td style={{color:"#e2e8f0"}}>{p.village}</td>
-              <td style={{color:"#94a3b8"}}>{p.area} Ha</td>
-              <td style={{color:"#94a3b8"}}>{p.owner}</td>
-            </tr>)}</tbody>
-          </table>
-        </>}
-      </div>
-    </div>
+      )}
+    </>
   );
-};
-
-const PosModal = ({mine, data, onClose}) => {
-  const pending = data.plots.filter(p=>p.status==="Pending");
-  const done = data.plots.filter(p=>p.status==="Done");
-  return (
-    <div className="modal-bg" onClick={onClose}>
-      <div className="modal" onClick={e=>e.stopPropagation()}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-          <div>
-            <div style={{fontSize:9,color:"#a855f7",letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:4}}>Possession Detail</div>
-            <div style={{fontSize:18,fontFamily:"'Syne',sans-serif",fontWeight:800,color:"#fff"}}>{mine.name}</div>
-          </div>
-          <button onClick={onClose} style={{background:"transparent",border:"1px solid #2d2d3d",color:"#94a3b8",padding:"4px 12px",borderRadius:3,cursor:"pointer",fontFamily:"inherit",fontSize:11}}>✕ Close</button>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:16}}>
-          {[{l:"Total",v:`${data.total.toFixed(1)} Ha`,c:"#e2e8f0"},{l:"Possessed",v:`${data.done.toFixed(1)} Ha`,c:"#a855f7"},{l:"Pending",v:`${(data.total-data.done).toFixed(1)} Ha`,c:"#ef4444"}].map((s,i)=>(
-            <div key={i} style={{background:"#060610",border:"1px solid #1e1e30",borderRadius:4,padding:"10px",textAlign:"center"}}>
-              <div style={{fontSize:8,color:"#64748b",marginBottom:3}}>{s.l}</div>
-              <div style={{fontSize:16,fontWeight:700,color:s.c,fontFamily:"'Syne',sans-serif"}}>{s.v}</div>
-            </div>
-          ))}
-        </div>
-        {pending.length>0 && <>
-          <div style={{fontSize:9,color:"#ef4444",letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:10,marginTop:16}}>⏳ Pending ({pending.length})</div>
-          <table style={{width:"100%",borderCollapse:"collapse",marginBottom:16}}>
-            <thead><tr style={{borderBottom:"1px solid #1e1e30"}}>{["Plot","Village","Area","Reason"].map(h=><th key={h}>{h}</th>)}</tr></thead>
-            <tbody>{pending.map((p,i)=><tr key={i}>
-              <td style={{color:"#ef4444",fontWeight:700}}>{p.no}</td>
-              <td style={{color:"#e2e8f0"}}>{p.village}</td>
-              <td style={{color:"#94a3b8"}}>{p.area} Ha</td>
-              <td><span className="badge" style={{background:"#2d1010",color:"#f87171"}}>{p.reason}</span></td>
-            </tr>)}</tbody>
-          </table>
-        </>}
-        {done.length>0 && <>
-          <div style={{fontSize:9,color:"#a855f7",letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:10}}>✅ Possessed ({done.length})</div>
-          <table style={{width:"100%",borderCollapse:"collapse"}}>
-            <thead><tr style={{borderBottom:"1px solid #1e1e30"}}>{["Plot","Village","Area","Handover Date"].map(h=><th key={h}>{h}</th>)}</tr></thead>
-            <tbody>{done.map((p,i)=><tr key={i}>
-              <td style={{color:"#a855f7",fontWeight:700}}>{p.no}</td>
-              <td style={{color:"#e2e8f0"}}>{p.village}</td>
-              <td style={{color:"#94a3b8"}}>{p.area} Ha</td>
-              <td style={{color:"#22c55e"}}>{p.date}</td>
-            </tr>)}</tbody>
-          </table>
-        </>}
-      </div>
-    </div>
-  );
-};
-
-const EofficeModal = ({file, onClose}) => {
-  const [bg,fg] = priC[file.priority]||["#1e1e30","#94a3b8"];
-  const mine = MINES.find(m=>m.id===file.mineId);
-  return (
-    <div className="modal-bg" onClick={onClose}>
-      <div className="modal" onClick={e=>e.stopPropagation()}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20}}>
-          <div>
-            <div style={{fontSize:9,color:"#3b82f6",letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:4}}>eOffice Detail</div>
-            <div style={{fontSize:16,fontFamily:"'Syne',sans-serif",fontWeight:800,color:"#fff"}}>{file.id}</div>
-          </div>
-          <div style={{display:"flex",gap:8,alignItems:"center"}}>
-            <span className="badge" style={{background:bg,color:fg,fontSize:11,padding:"3px 10px"}}>{file.priority}</span>
-            <button onClick={onClose} style={{background:"transparent",border:"1px solid #2d2d3d",color:"#94a3b8",padding:"4px 12px",borderRadius:3,cursor:"pointer",fontFamily:"inherit",fontSize:11}}>✕</button>
-          </div>
-        </div>
-        {[["Subject",file.subject],["Mine",mine?.name],["Sent By",file.by],["Days Open",`${file.days} days`],["Current Stage",file.stage]].map(([l,v])=>(
-          <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"9px 0",borderBottom:"1px solid #1e1e30"}}>
-            <span style={{fontSize:10,color:"#64748b"}}>{l}</span>
-            <span style={{fontSize:11,color:"#e2e8f0",fontWeight:500,textAlign:"right",maxWidth:"58%"}}>{v}</span>
-          </div>
-        ))}
-        <div style={{marginTop:14,padding:"14px",background:"#060610",border:"1px solid #3b82f640",borderRadius:4}}>
-          <div style={{fontSize:9,color:"#3b82f6",letterSpacing:"0.12em",marginBottom:6}}>📍 CURRENT LOCATION</div>
-          <div style={{fontSize:13,color:"#93c5fd",fontWeight:600}}>{file.desk}</div>
-        </div>
-        <div style={{marginTop:10,padding:"14px",background:"#060610",border:"1px solid #ef444440",borderRadius:4}}>
-          <div style={{fontSize:9,color:"#ef4444",letterSpacing:"0.12em",marginBottom:6}}>🚧 BOTTLENECK</div>
-          <div style={{fontSize:12,color:"#f87171",lineHeight:1.6}}>{file.bottleneck}</div>
-        </div>
-        <div style={{marginTop:10,padding:"14px",background:"#060610",border:"1px solid #22c55e40",borderRadius:4}}>
-          <div style={{fontSize:9,color:"#22c55e",letterSpacing:"0.12em",marginBottom:6}}>✅ NEXT ACTION</div>
-          <div style={{fontSize:12,color:"#4ade80",lineHeight:1.6}}>{file.next}</div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const HouseModal = ({data, onClose}) => {
-  const pending = data.structures.filter(s=>s.status==="Pending");
-  const paid = data.structures.filter(s=>s.status==="Paid");
-  return (
-    <div className="modal-bg" onClick={onClose}>
-      <div className="modal" onClick={e=>e.stopPropagation()}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-          <div>
-            <div style={{fontSize:9,color:"#f59e0b",letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:4}}>House Compensation</div>
-            <div style={{fontSize:18,fontFamily:"'Syne',sans-serif",fontWeight:800,color:"#fff"}}>{data.mineName}</div>
-          </div>
-          <button onClick={onClose} style={{background:"transparent",border:"1px solid #2d2d3d",color:"#94a3b8",padding:"4px 12px",borderRadius:3,cursor:"pointer",fontFamily:"inherit",fontSize:11}}>✕ Close</button>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:16}}>
-          {[
-            {l:"Total Structures",v:data.structures.length,c:"#f59e0b"},
-            {l:"Pending",v:pending.length,c:"#ef4444"},
-            {l:"Pending Amount",v:`₹${pending.reduce((s,x)=>s+x.amount,0).toFixed(1)}L`,c:"#f87171"},
-          ].map((s,i)=>(
-            <div key={i} style={{background:"#060610",border:"1px solid #1e1e30",borderRadius:4,padding:"10px",textAlign:"center"}}>
-              <div style={{fontSize:8,color:"#64748b",marginBottom:3}}>{s.l}</div>
-              <div style={{fontSize:16,fontWeight:700,color:s.c,fontFamily:"'Syne',sans-serif"}}>{s.v}</div>
-            </div>
-          ))}
-        </div>
-        {pending.length>0 && <>
-          <div style={{fontSize:9,color:"#ef4444",letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:10,marginTop:12}}>⏳ Pending ({pending.length})</div>
-          <table style={{width:"100%",borderCollapse:"collapse",marginBottom:16}}>
-            <thead><tr style={{borderBottom:"1px solid #1e1e30"}}>{["Owner","Type","Rooms","Amount","Due","Reason"].map(h=><th key={h}>{h}</th>)}</tr></thead>
-            <tbody>{pending.map((s,i)=><tr key={i}>
-              <td style={{color:"#e2e8f0"}}>{s.owner}</td>
-              <td style={{color:"#94a3b8"}}>{s.type}</td>
-              <td style={{color:"#f59e0b",fontWeight:700}}>{s.rooms}</td>
-              <td style={{color:"#ef4444",fontWeight:700}}>₹{s.amount}L</td>
-              <td style={{color:"#fb923c"}}>{s.due}</td>
-              <td><span className="badge" style={{background:"#2d1010",color:"#f87171"}}>{s.reason}</span></td>
-            </tr>)}</tbody>
-          </table>
-        </>}
-        {paid.length>0 && <>
-          <div style={{fontSize:9,color:"#22c55e",letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:10}}>✅ Paid ({paid.length})</div>
-          <table style={{width:"100%",borderCollapse:"collapse"}}>
-            <thead><tr style={{borderBottom:"1px solid #1e1e30"}}>{["Owner","Type","Rooms","Amount","Date"].map(h=><th key={h}>{h}</th>)}</tr></thead>
-            <tbody>{paid.map((s,i)=><tr key={i}>
-              <td style={{color:"#e2e8f0"}}>{s.owner}</td>
-              <td style={{color:"#94a3b8"}}>{s.type}</td>
-              <td style={{color:"#f59e0b"}}>{s.rooms}</td>
-              <td style={{color:"#22c55e",fontWeight:700}}>₹{s.amount}L</td>
-              <td style={{color:"#4ade80"}}>{s.due}</td>
-            </tr>)}</tbody>
-          </table>
-        </>}
-      </div>
-    </div>
-  );
-};
-
-// ── APP ───────────────────────────────────────────────────────────────────────
-
-export default function App() {
-  const [acqModal, setAcqModal] = useState(null);
-  const [posModal, setPosModal] = useState(null);
-  const [eofModal, setEofModal]  = useState(null);
-  const [houseModal, setHouseModal] = useState(null);
-
-  const totalAcq  = ACQ.reduce((s,m)=>s+m.total,0);
-  const doneAcq   = ACQ.reduce((s,m)=>s+m.done,0);
-  const totalPos  = POS.reduce((s,m)=>s+m.total,0);
-  const donePos   = POS.reduce((s,m)=>s+m.done,0);
-  const allStr    = HOUSE.flatMap(m=>m.structures);
-  const pendStr   = allStr.filter(s=>s.status==="Pending");
 
   return (
-    <div style={{fontFamily:"'DM Mono',monospace",background:"#060610",minHeight:"100vh",color:"#e2e8f0"}}>
-      <G/>
+    <>
+      <CalBtn/>
+      <div style={{position:"fixed",bottom:88,right:24,zIndex:190,
+        background:t.panelBg,border:`1px solid ${t.panelBdr}`,borderRadius:16,
+        padding:20,width:310,boxShadow:"0 12px 48px rgba(0,0,0,0.3)",animation:"slideUp 0.25s ease"}}>
 
-      {/* ── HEADER ── */}
-      <div style={{background:"linear-gradient(135deg,#0d0d1a,#060610)",borderBottom:"1px solid #1e1e30",padding:"18px 28px"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12}}>
-          <div>
-            <div style={{fontSize:9,color:"#3b82f6",letterSpacing:"0.25em",textTransform:"uppercase",marginBottom:5}}>Central Coalfields Limited · Argada Sub-Area</div>
-            <div style={{fontSize:26,fontFamily:"'Syne',sans-serif",fontWeight:800,color:"#fff",letterSpacing:"-0.02em"}}>
-              L&R <span style={{color:"#3b82f6"}}>Argada Area</span>
-            </div>
-            <div style={{fontSize:10,color:"#475569",marginTop:3}}>Land & Rehabilitation Intelligence Dashboard · FY 2025–26</div>
-          </div>
-          <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-            {[
-              {l:"TOTAL MINES",v:MINES.length,c:"#e2e8f0"},
-              {l:"EOFFICE FILES",v:EOFFICE.length,c:"#3b82f6"},
-              {l:"RTI OVERDUE",v:RTI.filter(r=>r.status==="Overdue").length,c:"#f87171"},
-              {l:"HOUSE PENDING",v:pendStr.length,c:"#f59e0b"},
-            ].map((s,i)=>(
-              <div key={i} style={{textAlign:"center",padding:"8px 14px",background:"#0d0d1a",border:"1px solid #1e1e30",borderRadius:4}}>
-                <div style={{fontSize:8,color:"#475569",letterSpacing:"0.1em"}}>{s.l}</div>
-                <div style={{fontSize:20,fontWeight:700,color:s.c,fontFamily:"'Syne',sans-serif"}}>{s.v}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div style={{padding:"24px 28px"}}>
-
-        {/* ══ 1. ACQUISITION ══ */}
-        <Divider label="Land Acquisition" color="#22c55e" icon="📋"/>
-        <div style={{display:"grid",gridTemplateColumns:"220px 1fr",gap:14,marginBottom:6}}>
-          {/* Big ring */}
-          <div className="card" style={{padding:20,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8}}>
-            <div style={{position:"relative"}}>
-              <Ring done={doneAcq} total={totalAcq} size={110} stroke={11} color="#22c55e"/>
-              <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
-                <span style={{fontSize:20,fontWeight:800,color:"#fff",fontFamily:"'Syne',sans-serif"}}>{pct(doneAcq,totalAcq)}%</span>
-              </div>
-            </div>
-            <div style={{textAlign:"center"}}>
-              <div style={{fontSize:11,color:"#22c55e",fontWeight:600}}>{doneAcq.toFixed(1)} Ha Acquired</div>
-              <div style={{fontSize:11,color:"#ef4444",fontWeight:600}}>{(totalAcq-doneAcq).toFixed(1)} Ha Pending</div>
-              <div style={{fontSize:10,color:"#475569",marginTop:2}}>of {totalAcq.toFixed(1)} Ha total</div>
-            </div>
-          </div>
-          {/* Mine rows */}
-          <div className="card" style={{padding:18}}>
-            <div style={{fontSize:9,color:"#22c55e",letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:14}}>Mine-wise Status — Click any row for plot details</div>
-            {ACQ.map((m,i)=>{
-              const mine = MINES.find(x=>x.id===m.mineId);
-              const pend = m.total - m.done;
-              const complete = pend === 0;
-              return (
-                <div key={i} className="rh" onClick={()=>setAcqModal({mine,data:m})}
-                  style={{padding:"10px 8px",borderRadius:4,marginBottom:4,display:"grid",gridTemplateColumns:"1fr auto auto",gap:10,alignItems:"center",transition:"background 0.15s"}}>
-                  <div>
-                    <div style={{fontSize:12,color:"#e2e8f0",marginBottom:5}}>{mine?.name}</div>
-                    <Bar done={m.done} total={m.total} color="#22c55e"/>
-                  </div>
-                  <div style={{textAlign:"right",minWidth:80}}>
-                    <div style={{fontSize:10,color:"#64748b"}}>Pending</div>
-                    <div style={{fontSize:14,fontWeight:700,color:complete?"#22c55e":"#ef4444",fontFamily:"'Syne',sans-serif"}}>{complete?"✅ Done":`${pend.toFixed(1)} Ha`}</div>
-                  </div>
-                  <div style={{fontSize:11,color:"#22c55e",opacity:0.6}}>→</div>
-                </div>
-              );
-            })}
-          </div>
+        {/* Month nav */}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+          <button onClick={prevMonth} style={{background:"transparent",border:"none",color:t.subColor,cursor:"pointer",fontSize:18,padding:"2px 8px"}}>‹</button>
+          <div style={{fontWeight:700,fontSize:14,color:t.titleColor}}>{months[curMonth]} {curYear}</div>
+          <button onClick={nextMonth} style={{background:"transparent",border:"none",color:t.subColor,cursor:"pointer",fontSize:18,padding:"2px 8px"}}>›</button>
         </div>
 
-        {/* ══ 2. POSSESSION ══ */}
-        <Divider label="Possession" color="#a855f7" icon="🏗️"/>
-        <div style={{display:"grid",gridTemplateColumns:"220px 1fr",gap:14,marginBottom:6}}>
-          <div className="card" style={{padding:20,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8}}>
-            <div style={{position:"relative"}}>
-              <Ring done={donePos} total={totalPos} size={110} stroke={11} color="#a855f7"/>
-              <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
-                <span style={{fontSize:20,fontWeight:800,color:"#fff",fontFamily:"'Syne',sans-serif"}}>{pct(donePos,totalPos)}%</span>
-              </div>
-            </div>
-            <div style={{textAlign:"center"}}>
-              <div style={{fontSize:11,color:"#a855f7",fontWeight:600}}>{donePos.toFixed(1)} Ha Possessed</div>
-              <div style={{fontSize:11,color:"#ef4444",fontWeight:600}}>{(totalPos-donePos).toFixed(1)} Ha Pending</div>
-              <div style={{fontSize:10,color:"#475569",marginTop:2}}>of {totalPos.toFixed(1)} Ha total</div>
-            </div>
-          </div>
-          <div className="card" style={{padding:18}}>
-            <div style={{fontSize:9,color:"#a855f7",letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:14}}>Mine-wise Status — Click any row for plot details</div>
-            {POS.map((m,i)=>{
-              const mine = MINES.find(x=>x.id===m.mineId);
-              const pend = m.total - m.done;
-              const complete = pend===0;
-              return (
-                <div key={i} className="rh" onClick={()=>setPosModal({mine,data:m})}
-                  style={{padding:"10px 8px",borderRadius:4,marginBottom:4,display:"grid",gridTemplateColumns:"1fr auto auto",gap:10,alignItems:"center",transition:"background 0.15s"}}>
-                  <div>
-                    <div style={{fontSize:12,color:"#e2e8f0",marginBottom:5}}>{mine?.name}</div>
-                    <Bar done={m.done} total={m.total} color="#a855f7"/>
-                  </div>
-                  <div style={{textAlign:"right",minWidth:80}}>
-                    <div style={{fontSize:10,color:"#64748b"}}>Pending</div>
-                    <div style={{fontSize:14,fontWeight:700,color:complete?"#a855f7":"#ef4444",fontFamily:"'Syne',sans-serif"}}>{complete?"✅ Done":`${pend.toFixed(1)} Ha`}</div>
-                  </div>
-                  <div style={{fontSize:11,color:"#a855f7",opacity:0.6}}>→</div>
-                </div>
-              );
-            })}
-          </div>
+        {/* Day headers */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2,marginBottom:4}}>
+          {DAYS.map(d=><div key={d} style={{textAlign:"center",fontSize:9,color:t.subColor,fontWeight:600,padding:"2px 0"}}>{d}</div>)}
         </div>
 
-        {/* ══ 3. EOFFICE ══ */}
-        <Divider label="eOffice Status" color="#3b82f6" icon="📂"/>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:14}}>
-          <KPI label="Total Files" value={EOFFICE.length} color="#3b82f6"/>
-          <KPI label="Critical" value={EOFFICE.filter(e=>e.priority==="Critical").length} color="#f87171"/>
-          <KPI label="High Priority" value={EOFFICE.filter(e=>e.priority==="High").length} color="#fb923c"/>
-          <KPI label="Avg Days Open" value={Math.round(EOFFICE.reduce((s,e)=>s+e.days,0)/EOFFICE.length)+"d"} color="#f59e0b"/>
-        </div>
-        <div className="card" style={{padding:18}}>
-          <div style={{fontSize:9,color:"#3b82f6",letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:14}}>All eOffice Files — Click any row for location & bottleneck</div>
-          <div style={{overflowX:"auto"}}>
-            <table style={{width:"100%",borderCollapse:"collapse"}}>
-              <thead><tr style={{borderBottom:"1px solid #1e1e30"}}>
-                {["eOffice No.","Subject","Current Desk","Stage","Days","Priority"].map(h=><th key={h}>{h}</th>)}
-              </tr></thead>
-              <tbody>
-                {EOFFICE.map((e,i)=>{
-                  const [bg,fg]=priC[e.priority]||["#1e1e30","#94a3b8"];
-                  return <tr key={i} className="rh" style={{transition:"background 0.15s"}} onClick={()=>setEofModal(e)}>
-                    <td style={{color:"#3b82f6",fontWeight:700}}>{e.id}</td>
-                    <td style={{color:"#e2e8f0",maxWidth:180,fontSize:10}}>{e.subject}</td>
-                    <td style={{color:"#94a3b8",fontSize:10}}>{e.desk}</td>
-                    <td style={{color:"#64748b",fontSize:10}}>{e.stage}</td>
-                    <td style={{color:e.days>30?"#ef4444":e.days>14?"#f59e0b":"#22c55e",fontWeight:700}}>{e.days}d</td>
-                    <td><span className="badge" style={{background:bg,color:fg}}>{e.priority}</span></td>
-                  </tr>;
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* ══ 4. HOUSE COMPENSATION ══ */}
-        <Divider label="House / Structure Compensation" color="#f59e0b" icon="🏠"/>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:14}}>
-          <KPI label="Total Structures" value={allStr.length} color="#f59e0b"/>
-          <KPI label="Pending" value={pendStr.length} color="#ef4444"/>
-          <KPI label="Pending Amount" value={`₹${pendStr.reduce((s,x)=>s+x.amount,0).toFixed(1)}L`} color="#f87171"/>
-          <KPI label="Paid" value={allStr.filter(s=>s.status==="Paid").length} color="#22c55e"/>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:12}}>
-          {HOUSE.map((m,i)=>{
-            const pending = m.structures.filter(s=>s.status==="Pending");
-            const paid = m.structures.filter(s=>s.status==="Paid");
-            const pendAmt = pending.reduce((s,x)=>s+x.amount,0);
+        {/* Date grid */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2}}>
+          {Array(firstDay).fill(null).map((_,i)=><div key={"e"+i}/>)}
+          {Array(daysInMonth).fill(null).map((_,i)=>{
+            const d      = i+1;
+            const ds     = dateStr(d);
+            const isToday= ds===todayStr;
+            const dayEvs = eventsMap[ds]||[];
+            const hasEv  = dayEvs.length>0;
+            const dotCol = hasEv ? (CAT_COLORS[dayEvs[0].category]||"#3b82f6") : null;
             return (
-              <div key={i} className="card cl" style={{padding:18}} onClick={()=>setHouseModal(m)}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
-                  <div>
-                    <div style={{fontSize:9,color:"#f59e0b",letterSpacing:"0.1em",marginBottom:4}}>{m.mineId}</div>
-                    <div style={{fontSize:14,fontFamily:"'Syne',sans-serif",fontWeight:700,color:"#fff"}}>{m.mineName}</div>
+              <div key={d} onClick={()=>setPopupDay(ds===popupDay?null:ds)}
+                style={{position:"relative",textAlign:"center",padding:"6px 2px",borderRadius:6,
+                  cursor:hasEv?"pointer":"default",fontSize:11,fontWeight:isToday?800:400,
+                  color:isToday?"#fff":hasEv?"#3b82f6":t.tdColor,
+                  background:isToday?"#3b82f6":hasEv?`${dotCol}18`:"transparent",
+                  border:hasEv&&!isToday?`1px solid ${dotCol}50`:"1px solid transparent",
+                  transition:"all 0.15s"}}>
+                {d}
+                {hasEv && (
+                  <div style={{display:"flex",justifyContent:"center",gap:2,marginTop:2}}>
+                    {dayEvs.slice(0,3).map((e,ei)=>(
+                      <div key={ei} style={{width:4,height:4,borderRadius:"50%",
+                        background:isToday?"#fff":(CAT_COLORS[e.category]||"#3b82f6")}}/>
+                    ))}
                   </div>
-                  <div style={{textAlign:"right"}}>
-                    <div style={{fontSize:9,color:"#64748b"}}>PENDING AMT</div>
-                    <div style={{fontSize:18,fontWeight:700,color:"#ef4444",fontFamily:"'Syne',sans-serif"}}>₹{pendAmt.toFixed(1)}L</div>
+                )}
+
+                {/* Event popup */}
+                {popupDay===ds && hasEv && (
+                  <div onClick={e=>e.stopPropagation()} style={{
+                    position:"absolute",bottom:"110%",
+                    left:d>21?"auto":d<7?"0":"50%",
+                    right:d>21?"0":"auto",
+                    transform:d>21||d<7?"none":"translateX(-50%)",
+                    background:t.panelBg,border:"1px solid #3b82f6",
+                    borderRadius:12,padding:"12px 14px",zIndex:300,
+                    width:220,boxShadow:"0 8px 28px rgba(0,0,0,0.3)",textAlign:"left",
+                  }}>
+                    <div style={{fontSize:9,color:"#3b82f6",textTransform:"uppercase",
+                      letterSpacing:"0.1em",marginBottom:8,fontWeight:600}}>
+                      {d} {months[curMonth]} · {dayEvs.length} event{dayEvs.length>1?"s":""}
+                    </div>
+                    {dayEvs.map((e,idx)=>(
+                      <div key={idx} style={{padding:"6px 0",
+                        borderBottom:idx<dayEvs.length-1?`1px solid ${t.tableBdr}`:"none"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2}}>
+                          <div style={{width:7,height:7,borderRadius:"50%",
+                            background:CAT_COLORS[e.category]||"#3b82f6",flexShrink:0}}/>
+                          <div style={{fontSize:11,fontWeight:600,color:t.titleColor}}>{e.title}</div>
+                        </div>
+                        {e.note && <div style={{fontSize:10,color:t.subColor,paddingLeft:13,lineHeight:1.4}}>{e.note}</div>}
+                        <div style={{fontSize:9,color:CAT_COLORS[e.category]||"#3b82f6",paddingLeft:13,marginTop:2,fontWeight:600}}>{e.category}</div>
+                      </div>
+                    ))}
                   </div>
-                </div>
-                <Bar done={paid.length} total={m.structures.length} color="#f59e0b"/>
-                <div style={{display:"flex",justifyContent:"space-between",marginTop:8}}>
-                  <div style={{display:"flex",gap:14}}>
-                    <span style={{fontSize:10,color:"#22c55e"}}>✅ Paid: {paid.length}</span>
-                    <span style={{fontSize:10,color:"#ef4444"}}>⏳ Pending: {pending.length}</span>
-                    <span style={{fontSize:10,color:"#f59e0b"}}>🏠 Rooms: {pending.reduce((s,x)=>s+x.rooms,0)} pending</span>
-                  </div>
-                  <span style={{fontSize:10,color:"#f59e0b"}}>Details →</span>
-                </div>
+                )}
               </div>
             );
           })}
         </div>
 
-        {/* ══ 5. RTI ══ */}
-        <Divider label="RTI Pending" color="#ef4444" icon="📜"/>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:14}}>
-          <KPI label="Total RTI Pending" value={RTI.length} color="#ef4444"/>
-          <KPI label="Overdue" value={RTI.filter(r=>r.status==="Overdue").length} color="#f87171" sub="Immediate action needed"/>
-          <KPI label="Due Within 7 Days" value={RTI.filter(r=>r.daysLeft>=0&&r.daysLeft<=7).length} color="#fb923c"/>
+        {/* Legend */}
+        <div style={{marginTop:12,paddingTop:10,borderTop:`1px solid ${t.tableBdr}`,display:"flex",flexWrap:"wrap",gap:6}}>
+          {Object.entries(CAT_COLORS).map(([cat,col])=>(
+            <div key={cat} style={{display:"flex",alignItems:"center",gap:4}}>
+              <div style={{width:7,height:7,borderRadius:"50%",background:col}}/>
+              <span style={{fontSize:9,color:t.subColor}}>{cat}</span>
+            </div>
+          ))}
         </div>
 
-        {RTI.some(r=>r.status==="Overdue") && (
-          <div style={{marginBottom:14,padding:"12px 16px",background:"#1a0808",border:"1px solid #ef444450",borderLeft:"4px solid #ef4444",borderRadius:4}}>
-            <span style={{fontSize:11,color:"#f87171",fontWeight:700}}>⚠️ OVERDUE ALERT: </span>
-            <span style={{fontSize:11,color:"#f87171"}}>{RTI.filter(r=>r.status==="Overdue").length} RTI applications overdue. Under RTI Act 2005, penalty of ₹250/day applies. Immediate action required.</span>
-          </div>
-        )}
+        {/* Google Sheets hint */}
+        <div style={{marginTop:10,padding:"8px 10px",background:t.kpiBg,
+          border:`1px solid ${t.kpiBdr}`,borderRadius:8,fontSize:10,color:t.subColor,textAlign:"center"}}>
+          Add events in <span style={{color:"#3b82f6",fontWeight:600}}>Google Sheets → events tab</span>
+          <br/>Dashboard updates automatically
+        </div>
+      </div>
+    </>
+  );
+};
 
-        <div className="card" style={{padding:18}}>
-          <div style={{fontSize:9,color:"#ef4444",letterSpacing:"0.15em",textTransform:"uppercase",marginBottom:14}}>RTI Register — Sorted by Urgency</div>
-          <div style={{overflowX:"auto"}}>
-            <table style={{width:"100%",borderCollapse:"collapse"}}>
-              <thead><tr style={{borderBottom:"1px solid #1e1e30"}}>
-                {["RTI No.","Applicant","Subject","Mine","Deadline","Days Left","Status","Action Required"].map(h=><th key={h}>{h}</th>)}
-              </tr></thead>
-              <tbody>
-                {[...RTI].sort((a,b)=>a.daysLeft-b.daysLeft).map((r,i)=>{
-                  const [bg,fg]=rtiC[r.status]||["#1e1e30","#94a3b8"];
-                  const mine = MINES.find(m=>m.id===r.mineId);
-                  return <tr key={i} style={{transition:"background 0.15s"}}>
-                    <td style={{color:"#ef4444",fontWeight:700}}>{r.id}</td>
-                    <td style={{color:"#e2e8f0"}}>{r.applicant}</td>
-                    <td style={{color:"#94a3b8",fontSize:10,maxWidth:150}}>{r.subject}</td>
-                    <td style={{color:"#64748b",fontSize:10}}>{mine?.name}</td>
-                    <td style={{color:"#fb923c",fontWeight:600}}>{r.deadline}</td>
-                    <td style={{fontWeight:700,color:r.daysLeft<0?"#f87171":r.daysLeft<=7?"#fb923c":"#60a5fa"}}>
-                      {r.daysLeft<0?`${Math.abs(r.daysLeft)}d overdue`:`${r.daysLeft}d left`}
-                    </td>
-                    <td><span className="badge" style={{background:bg,color:fg}}>{r.status}</span></td>
-                    <td style={{color:"#94a3b8",fontSize:10}}>{r.action}</td>
-                  </tr>;
-                })}
-              </tbody>
+// ── MAIN APP ──────────────────────────────────────────────────────────────────
+export default function App() {
+  const [data,   setData]   = useState(null);
+  const [err,    setErr]    = useState(null);
+  const [open,   setOpen]   = useState(null);
+  const [dark,   setDark]   = useState(true);
+  const t = dark ? DARK : LIGHT;
+
+  useEffect(() => {
+    Promise.all(SHEETS.map(s => fetch(csvUrl(s)).then(r=>r.text()).then(t=>({[s]:parseCSV(t)}))))
+      .then(results => setData(Object.assign({},...results)))
+      .catch(e => setErr(e.message));
+  }, []);
+
+  if (err)   return <><G t={DARK}/><ErrBox msg={err}/></>;
+  if (!data) return <><G t={DARK}/><Spinner/></>;
+
+  const mines    = data.mines    || [];
+  const acqRows  = data.acquisition || [];
+  const upRows   = data.upcoming_acquisition || [];
+  const posRows  = data.possession || [];
+  const eofRows  = data.eoffice  || [];
+  const houseRows= data.house    || [];
+  const rtiRows  = data.rti      || [];
+  const legalRows= data.legal    || [];
+
+  const mineColor = id => mines.find(m=>m.mineId===id)?.color || "#3b82f6";
+  const mineName  = id => mines.find(m=>m.mineId===id)?.mineName || id;
+
+  // ── ACQUISITION PANEL ──────────────────────────────────────────────────────
+  const AcqPanel = () => {
+    const [catView, setCatView] = useState(null);
+    const [upOpen,  setUpOpen]  = useState(false);
+    const [upMine,  setUpMine]  = useState(null);
+
+    const acts = [...new Set(acqRows.map(r=>r.act).filter(Boolean))];
+    const upMines = [...new Set(upRows.map(r=>r.mineId))];
+    const totalAcq = acqRows.filter(r=>r.status==="Done").reduce((s,r)=>s+parseFloat(r.area_Ha||0),0);
+    const upTotal  = upRows.reduce((s,r)=>s+parseFloat(r.area_Ha||0),0);
+
+    if (catView) {
+      const rows = acqRows.filter(r=>r.act===catView);
+      const mineIds = [...new Set(rows.map(r=>r.mineId))];
+      return (
+        <Panel title="Land Acquisition" icon="📋" color="#22c55e" onClose={()=>setOpen(null)}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:20}}>
+            <button className="back-btn" onClick={()=>setCatView(null)}>← Back</button>
+            <span style={{fontSize:14,fontWeight:700,color:"#22c55e"}}>{catView}</span>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:16}}>
+            <KPI l="Total Plots" v={rows.length} c="#22c55e" t={t}/>
+            <KPI l="Area (Ha)" v={rows.reduce((s,r)=>s+parseFloat(r.area_Ha||0),0).toFixed(1)} c="#e2eaf4" t={t}/>
+            <KPI l="Pending" v={rows.filter(r=>r.status==="Pending").length} c="#ef4444" t={t}/>
+          </div>
+          <table>
+            <thead><tr>{["Mine","Plot","Village","Area","Status","Reason","Owner"].map(h=><th key={h}>{h}</th>)}</tr></thead>
+            <tbody>{rows.map((r,i)=><tr key={i}>
+              <td style={{color:"#22c55e",fontWeight:500}}>{mineName(r.mineId)}</td>
+              <td style={{color:"#94a3b8"}}>{r.plotNo}</td>
+              <td>{r.village}</td>
+              <td>{r.area_Ha} Ha</td>
+              <td><StatusBadge s={r.status}/></td>
+              <td style={{color:"#fb923c",fontSize:11}}>{r.reason}</td>
+              <td style={{color:"#94a3b8"}}>{r.owner}</td>
+            </tr>)}</tbody>
+          </table>
+        </Panel>
+      );
+    }
+
+    if (upOpen) {
+      if (upMine) {
+        const rows = upRows.filter(r=>r.mineId===upMine);
+        return (
+          <Panel title="Upcoming Acquisition" icon="🔜" color="#f97316" onClose={()=>setOpen(null)}>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:20}}>
+              <button className="back-btn" onClick={()=>setUpMine(null)}>← All Upcoming</button>
+              <span style={{fontSize:14,fontWeight:700,color:"#f97316"}}>{mineName(upMine)}</span>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:16}}>
+              <KPI l="Total Area" v={`${rows.reduce((s,r)=>s+parseFloat(r.area_Ha||0),0).toFixed(1)} Ha`} c="#f97316" t={t}/>
+              <KPI l="Plots/Blocks" v={rows.length} c="#e2eaf4" t={t}/>
+              <KPI l="Expected Start" v={rows[0]?.expectedStart||"—"} c="#a78bfa" t={t}/>
+            </div>
+            <table>
+              <thead><tr>{["Village/Block","Area (Ha)","Owners","Act","Est. Start","Remarks"].map(h=><th key={h}>{h}</th>)}</tr></thead>
+              <tbody>{rows.map((r,i)=><tr key={i}>
+                <td style={{color:"#e2eaf4",fontWeight:500}}>{r.village}</td>
+                <td style={{color:"#f97316",fontWeight:600}}>{r.area_Ha} Ha</td>
+                <td style={{textAlign:"center"}}>{r.noOfOwners}</td>
+                <td><span className="badge" style={{background:"#1a1000",color:"#f59e0b"}}>{r.act}</span></td>
+                <td style={{color:"#a78bfa"}}>{r.expectedStart}</td>
+                <td style={{color:"#fb923c",fontSize:11}}>{r.remarks}</td>
+              </tr>)}</tbody>
             </table>
+          </Panel>
+        );
+      }
+      return (
+        <Panel title="Upcoming Acquisition" icon="🔜" color="#f97316" onClose={()=>setOpen(null)}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:20}}>
+            <button className="back-btn" onClick={()=>setUpOpen(false)}>← Back</button>
+            <span style={{fontSize:14,fontWeight:700,color:"#f97316"}}>Upcoming Land to be Acquired</span>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:24}}>
+            <KPI l="Total Area" v={`${upTotal.toFixed(1)} Ha`} c="#f97316" t={t}/>
+            <KPI l="Mines" v={upMines.length} c="#e2eaf4" t={t}/>
+            <KPI l="Total Plots/Blocks" v={upRows.length} c="#a78bfa" t={t}/>
+          </div>
+          <div style={{fontSize:10,color:"#4a6080",textTransform:"uppercase",letterSpacing:"0.12em",marginBottom:20,textAlign:"center",fontWeight:600}}>Select a mine</div>
+          <div style={{display:"flex",gap:32,justifyContent:"center",flexWrap:"wrap"}}>
+            {upMines.map((mid,i) => {
+              const mrows = upRows.filter(r=>r.mineId===mid);
+              const area  = mrows.reduce((s,r)=>s+parseFloat(r.area_Ha||0),0);
+              const col   = mineColor(mid);
+              return (
+                <Circle key={i} icon="🔜" label={mineName(mid)} value={`${area.toFixed(0)}`}
+                  sub="Ha to acquire" color={col} onClick={()=>setUpMine(mid)} size={130} t={t}/>
+              );
+            })}
+          </div>
+        </Panel>
+      );
+    }
+
+    return (
+      <Panel title="Land Acquisition" icon="📋" color="#22c55e" onClose={()=>setOpen(null)}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:24}}>
+          <KPI l="Total Acquired (Ha)" v={totalAcq.toFixed(1)} c="#22c55e" t={t}/>
+          <KPI l="Pending Plots" v={acqRows.filter(r=>r.status==="Pending").length} c="#ef4444" t={t}/>
+          <KPI l="Upcoming (Ha)" v={upTotal.toFixed(1)} c="#f97316" t={t}/>
+        </div>
+        <div style={{fontSize:10,color:"#4a6080",textTransform:"uppercase",letterSpacing:"0.12em",marginBottom:16,textAlign:"center",fontWeight:600}}>Acquired land — by mode (tap to view plots)</div>
+        <div style={{display:"grid",gridTemplateColumns:`repeat(${Math.min(acts.length,5)},1fr)`,gap:12,justifyItems:"center",marginBottom:0}}>
+          {acts.map((act,i) => {
+            const rows  = acqRows.filter(r=>r.act===act);
+            const area  = rows.filter(r=>r.status==="Done").reduce((s,r)=>s+parseFloat(r.area_Ha||0),0);
+            const colors= ["#22c55e","#3b82f6","#a855f7","#f59e0b","#64748b","#e879f9","#f97316"];
+            return <Circle key={i} label={act} value={area.toFixed(0)} sub={`Ha · ${rows.length} plots`}
+              color={colors[i%colors.length]} onClick={()=>setCatView(act)} size={120} t={t}/>;
+          })}
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:12,margin:"24px 0"}}>
+          <div style={{flex:1,height:1,background:"linear-gradient(90deg,transparent,#1e3a5f,transparent)"}}/>
+          <span style={{fontSize:9,color:"#2d5a8e",letterSpacing:"0.15em",textTransform:"uppercase",whiteSpace:"nowrap"}}>Upcoming Land to be Acquired</span>
+          <div style={{flex:1,height:1,background:"linear-gradient(90deg,#1e3a5f,transparent)"}}/>
+        </div>
+        <div style={{display:"flex",justifyContent:"center"}}>
+          <Circle icon="🔜" label="Upcoming Acquisition" value={upTotal.toFixed(0)}
+            sub={`Ha · ${upMines.length} mines`} color="#f97316" onClick={()=>setUpOpen(true)} size={130} t={t}/>
+        </div>
+      </Panel>
+    );
+  };
+
+  // ── POSSESSION PANEL ───────────────────────────────────────────────────────
+  const PosPanel = () => {
+    const mineIds = [...new Set(posRows.map(r=>r.mineId))];
+    const total   = posRows.reduce((s,r)=>s+parseFloat(r.area_Ha||0),0);
+    const done    = posRows.filter(r=>r.status==="Done").reduce((s,r)=>s+parseFloat(r.area_Ha||0),0);
+    return (
+      <Panel title="Possession" icon="🏗️" color="#a855f7" onClose={()=>setOpen(null)} t={t}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:20}}>
+          <KPI l="Total (Ha)" v={total.toFixed(1)} c="#e2eaf4" t={t}/>
+          <KPI l="Possessed (Ha)" v={done.toFixed(1)} c="#a855f7" t={t}/>
+          <KPI l="Pending (Ha)" v={(total-done).toFixed(1)} c="#ef4444" t={t}/>
+        </div>
+        <table style={{marginBottom:16}}>
+          <thead><tr>{["Mine","Plot","Village","Area","Status","Reason","Handover Date"].map(h=><th key={h}>{h}</th>)}</tr></thead>
+          <tbody>{posRows.map((r,i)=><tr key={i}>
+            <td style={{color:"#a855f7",fontWeight:500}}>{mineName(r.mineId)}</td>
+            <td style={{color:"#94a3b8"}}>{r.plotNo}</td>
+            <td>{r.village}</td>
+            <td>{r.area_Ha} Ha</td>
+            <td><StatusBadge s={r.status}/></td>
+            <td style={{color:"#fb923c",fontSize:11}}>{r.reason}</td>
+            <td style={{color:"#4ade80"}}>{r.handoverDate||"—"}</td>
+          </tr>)}</tbody>
+        </table>
+      </Panel>
+    );
+  };
+
+  // ── RTI PANEL ──────────────────────────────────────────────────────────────
+  const RtiPanel = () => {
+    const overdue = rtiRows.filter(r=>r.status==="Overdue").length;
+    return (
+      <Panel title="RTI Pending" icon="📜" color="#ef4444" onClose={()=>setOpen(null)} t={t}>
+        {overdue>0 && <div style={{background:"#1a0808",border:"1px solid #ef444440",borderLeft:"3px solid #ef4444",borderRadius:8,padding:"10px 16px",marginBottom:16,fontSize:12,color:"#f87171"}}>
+          ⚠️ {overdue} RTI overdue — penalty ₹250/day applies under RTI Act 2005
+        </div>}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:20}}>
+          <KPI l="Total Pending" v={rtiRows.length} c="#ef4444" t={t}/>
+          <KPI l="Overdue" v={overdue} c="#f87171" t={t}/>
+          <KPI l="Due Within 7 Days" v={rtiRows.filter(r=>parseInt(r.daysLeft||0)>=0&&parseInt(r.daysLeft||0)<=7).length} c="#fb923c" t={t}/>
+        </div>
+        <table>
+          <thead><tr>{["RTI No.","Applicant","Subject","Mine","Deadline","Days Left","Status","Action"].map(h=><th key={h}>{h}</th>)}</tr></thead>
+          <tbody>{[...rtiRows].sort((a,b)=>parseInt(a.daysLeft||0)-parseInt(b.daysLeft||0)).map((r,i)=>{
+            const dl = parseInt(r.daysLeft||0);
+            return <tr key={i}>
+              <td style={{color:"#ef4444",fontWeight:600,whiteSpace:"nowrap"}}>{r.id}</td>
+              <td>{r.applicant}</td>
+              <td style={{fontSize:11}}>{r.subject}</td>
+              <td style={{color:"#94a3b8",fontSize:11}}>{mineName(r.mineId)}</td>
+              <td style={{color:"#fb923c",whiteSpace:"nowrap"}}>{r.deadline}</td>
+              <td style={{fontWeight:700,color:dl<0?"#f87171":dl<=7?"#fb923c":"#60a5fa",whiteSpace:"nowrap"}}>
+                {dl<0?`${Math.abs(dl)}d overdue`:`${dl}d left`}
+              </td>
+              <td><StatusBadge s={r.status}/></td>
+              <td style={{fontSize:11,color:"#94a3b8"}}>{r.actionRequired}</td>
+            </tr>;
+          })}</tbody>
+        </table>
+      </Panel>
+    );
+  };
+
+  // ── HOUSE PANEL ────────────────────────────────────────────────────────────
+  const HousePanel = () => {
+    const [selMine, setSelMine] = useState(null);
+    const mineIds = [...new Set(houseRows.map(r=>r.mineId))];
+    const allPend = houseRows.filter(r=>r.fileStatus==="Pending");
+
+    if (selMine) {
+      const rows    = houseRows.filter(r=>r.mineId===selMine);
+      const pending = rows.filter(r=>r.fileStatus==="Pending");
+      const paid    = rows.filter(r=>r.fileStatus==="Paid");
+      const prodDate= rows[0]?.productionReachDate||"—";
+      const bottleneck = [...new Set(rows.filter(r=>r.bottleneck&&r.bottleneck!=="—").map(r=>r.bottleneck))].join(". ");
+      return (
+        <Panel title="House Compensation" icon="🏠" color="#f59e0b" onClose={()=>setOpen(null)} t={t}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:20}}>
+            <button className="back-btn" onClick={()=>setSelMine(null)}>← All Mines</button>
+            <span style={{fontSize:14,fontWeight:700,color:"#f59e0b"}}>{mineName(selMine)}</span>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:16}}>
+            <KPI l="Surveyed" v={rows.length} c="#f59e0b" t={t}/>
+            <KPI l="Total Valuation" v={`₹${rows.reduce((s,r)=>s+parseFloat(r.valuation_Lakhs||0),0).toFixed(1)}L`} c="#e2eaf4" t={t}/>
+            <KPI l="Pending" v={pending.length} c="#ef4444" t={t}/>
+            <KPI l="Production Reaches" v={prodDate} c="#a78bfa" t={t}/>
+          </div>
+          {bottleneck && <div style={{background:"#0f0a00",border:"1px solid #f59e0b40",borderLeft:"3px solid #f59e0b",borderRadius:8,padding:"12px 16px",marginBottom:16}}>
+            <div style={{fontSize:9,color:"#f59e0b",textTransform:"uppercase",letterSpacing:"0.12em",marginBottom:6,fontWeight:600}}>🚧 Bottleneck for Dismantling</div>
+            <div style={{fontSize:12,color:"#fbbf24",lineHeight:1.7}}>{bottleneck}</div>
+          </div>}
+          {pending.length>0 && <>
+            <div style={{fontSize:10,color:"#ef4444",textTransform:"uppercase",letterSpacing:"0.12em",marginBottom:8,fontWeight:600}}>⏳ Pending ({pending.length})</div>
+            <table style={{marginBottom:16}}>
+              <thead><tr>{["Owner","Type","Rooms","Valuation","File Status","Dismantle","Bottleneck"].map(h=><th key={h}>{h}</th>)}</tr></thead>
+              <tbody>{pending.map((r,i)=><tr key={i}>
+                <td style={{color:"#e2eaf4",fontWeight:500}}>{r.owner}</td>
+                <td style={{color:"#94a3b8"}}>{r.type}</td>
+                <td style={{textAlign:"center",color:"#f59e0b",fontWeight:600}}>{r.rooms}</td>
+                <td style={{color:"#ef4444",fontWeight:600}}>₹{r.valuation_Lakhs}L</td>
+                <td><StatusBadge s={r.fileStatus}/></td>
+                <td><span className="badge" style={{background:"#2d1a0f",color:"#fb923c"}}>{r.dismantleStatus}</span></td>
+                <td style={{color:"#fb923c",fontSize:11}}>{r.bottleneck}</td>
+              </tr>)}</tbody>
+            </table>
+          </>}
+          {paid.length>0 && <>
+            <div style={{fontSize:10,color:"#22c55e",textTransform:"uppercase",letterSpacing:"0.12em",marginBottom:8,fontWeight:600}}>✅ Paid ({paid.length})</div>
+            <table>
+              <thead><tr>{["Owner","Type","Rooms","Amount","Dismantle Status"].map(h=><th key={h}>{h}</th>)}</tr></thead>
+              <tbody>{paid.map((r,i)=><tr key={i}>
+                <td style={{color:"#e2eaf4",fontWeight:500}}>{r.owner}</td>
+                <td style={{color:"#94a3b8"}}>{r.type}</td>
+                <td style={{textAlign:"center",color:"#f59e0b"}}>{r.rooms}</td>
+                <td style={{color:"#22c55e",fontWeight:600}}>₹{r.valuation_Lakhs}L</td>
+                <td><span className="badge" style={{background:"#0f3d1f",color:"#4ade80"}}>{r.dismantleStatus}</span></td>
+              </tr>)}</tbody>
+            </table>
+          </>}
+        </Panel>
+      );
+    }
+
+    return (
+      <Panel title="House Compensation" icon="🏠" color="#f59e0b" onClose={()=>setOpen(null)} t={t}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:28}}>
+          <KPI l="Total Surveyed" v={houseRows.length} c="#f59e0b" t={t}/>
+          <KPI l="Total Valuation" v={`₹${houseRows.reduce((s,r)=>s+parseFloat(r.valuation_Lakhs||0),0).toFixed(1)}L`} c="#e2eaf4" t={t}/>
+          <KPI l="Pending" v={allPend.length} c="#ef4444" t={t}/>
+          <KPI l="Pending Amount" v={`₹${allPend.reduce((s,r)=>s+parseFloat(r.valuation_Lakhs||0),0).toFixed(1)}L`} c="#f87171" t={t}/>
+        </div>
+        <div style={{fontSize:10,color:"#4a6080",textTransform:"uppercase",letterSpacing:"0.12em",marginBottom:20,textAlign:"center",fontWeight:600}}>Select a mine</div>
+        <div style={{display:"grid",gridTemplateColumns:`repeat(${Math.min(mineIds.length,4)},1fr)`,gap:16,justifyItems:"center"}}>
+          {mineIds.map((mid,i)=>{
+            const rows   = houseRows.filter(r=>r.mineId===mid);
+            const pend   = rows.filter(r=>r.fileStatus==="Pending").length;
+            const paid   = rows.filter(r=>r.fileStatus==="Paid").length;
+            const color  = pend>0?"#f59e0b":"#22c55e";
+            return <Circle key={i} label={mineName(mid)} value={pend}
+              sub={`pending · ✅${paid} paid`} color={color}
+              onClick={()=>setSelMine(mid)} size={120} t={t}/>;
+          })}
+        </div>
+      </Panel>
+    );
+  };
+
+  // ── EOFFICE PANEL ──────────────────────────────────────────────────────────
+  const EofficePanel = () => (
+    <Panel title="eOffice Files" icon="📂" color="#3b82f6" onClose={()=>setOpen(null)} t={t}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:20}}>
+        <KPI l="Total Files" v={eofRows.length} c="#3b82f6" t={t}/>
+        <KPI l="Critical" v={eofRows.filter(e=>e.priority==="Critical").length} c="#f87171" t={t}/>
+        <KPI l="Avg Days Open" v={eofRows.length?Math.round(eofRows.reduce((s,e)=>s+parseInt(e.daysOpen||0),0)/eofRows.length)+"d":"—"} c="#f59e0b" t={t}/>
+      </div>
+      <table>
+        <thead><tr>{["eOffice No.","Subject","Current Desk","Stage","Bottleneck","Days","Priority"].map(h=><th key={h}>{h}</th>)}</tr></thead>
+        <tbody>{eofRows.map((e,i)=><tr key={i}>
+          <td style={{color:"#3b82f6",fontWeight:600,whiteSpace:"nowrap"}}>{e.id}</td>
+          <td>{e.subject}</td>
+          <td style={{color:"#94a3b8",fontSize:11}}>{e.currentDesk}</td>
+          <td style={{color:"#60a5fa",fontSize:11}}>{e.stage}</td>
+          <td style={{color:"#fb923c",fontSize:11}}>{e.bottleneck}</td>
+          <td style={{color:parseInt(e.daysOpen||0)>30?"#f87171":parseInt(e.daysOpen||0)>14?"#fb923c":"#4ade80",fontWeight:700}}>{e.daysOpen}d</td>
+          <td><StatusBadge s={e.priority}/></td>
+        </tr>)}</tbody>
+      </table>
+    </Panel>
+  );
+
+  // ── LEGAL PANEL ────────────────────────────────────────────────────────────
+  const LegalPanel = () => {
+    const urgent = legalRows.filter(l=>l.status==="Urgent"||l.status==="Due Soon").length;
+    return (
+      <Panel title="Legal Cases" icon="⚖️" color="#e879f9" onClose={()=>setOpen(null)} t={t}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:20}}>
+          <KPI l="Total Cases" v={legalRows.length} c="#e879f9" t={t}/>
+          <KPI l="Urgent / Due Soon" v={urgent} c="#f87171" t={t}/>
+          <KPI l="Total Disputed" v={`₹${legalRows.filter(l=>l.amount&&l.amount!=="N/A").length} cases`} c="#fb923c" t={t}/>
+        </div>
+        <table>
+          <thead><tr>{["Case No.","Court","Subject","Mine","Amount","Next Date","Status"].map(h=><th key={h}>{h}</th>)}</tr></thead>
+          <tbody>{legalRows.map((l,i)=><tr key={i}>
+            <td style={{color:"#e879f9",fontWeight:600,whiteSpace:"nowrap"}}>{l.id}</td>
+            <td style={{color:"#94a3b8",fontSize:11}}>{l.court}</td>
+            <td>{l.subject}</td>
+            <td style={{color:"#a78bfa"}}>{mineName(l.mineId)}</td>
+            <td style={{color:"#fb923c",fontWeight:600,whiteSpace:"nowrap"}}>{l.amount}</td>
+            <td style={{color:"#60a5fa",whiteSpace:"nowrap"}}>{l.nextDate}</td>
+            <td><StatusBadge s={l.status}/></td>
+          </tr>)}</tbody>
+        </table>
+      </Panel>
+    );
+  };
+
+  // ── DASHBOARD CIRCLES ──────────────────────────────────────────────────────
+  const overdueRTI = rtiRows.filter(r=>r.status==="Overdue").length;
+  const pendHouse  = houseRows.filter(r=>r.fileStatus==="Pending").length;
+  const critEof    = eofRows.filter(e=>e.priority==="Critical").length;
+  const urgLegal   = legalRows.filter(l=>l.status==="Urgent"||l.status==="Due Soon").length;
+  const acqDone    = acqRows.filter(r=>r.status==="Done").reduce((s,r)=>s+parseFloat(r.area_Ha||0),0);
+  const acqTotal   = acqRows.reduce((s,r)=>s+parseFloat(r.area_Ha||0),0);
+  const posTotal   = posRows.reduce((s,r)=>s+parseFloat(r.area_Ha||0),0);
+  const posDone    = posRows.filter(r=>r.status==="Done").reduce((s,r)=>s+parseFloat(r.area_Ha||0),0);
+
+  const CARDS = [
+    {key:"acq",   icon:"📋", label:"Acquisition",  value:`${acqTotal?Math.round((acqDone/acqTotal)*100):0}%`, sub:`${(acqTotal-acqDone).toFixed(0)} Ha pending`,  color:"#22c55e"},
+    {key:"pos",   icon:"🏗️", label:"Possession",   value:`${posTotal?Math.round((posDone/posTotal)*100):0}%`, sub:`${(posTotal-posDone).toFixed(0)} Ha pending`,  color:"#a855f7"},
+    {key:"rti",   icon:"📜", label:"RTI Pending",  value:rtiRows.length,   sub:`${overdueRTI} overdue`,  color:"#ef4444", alert:overdueRTI>0?`⚠️ ${overdueRTI} OVERDUE`:null},
+    {key:"house", icon:"🏠", label:"House Comp.",  value:pendHouse,        sub:"structures pending",     color:"#f59e0b"},
+    {key:"eof",   icon:"📂", label:"eOffice",      value:eofRows.length,   sub:`${critEof} critical`,    color:"#3b82f6"},
+    {key:"legal", icon:"⚖️", label:"Legal Cases", value:legalRows.length, sub:`${urgLegal} urgent`,     color:"#e879f9"},
+  ];
+
+  return (
+    <div style={{fontFamily:"'Inter',sans-serif",background:t.pageBg,minHeight:"100vh",display:"flex",flexDirection:"column",transition:"background 0.3s"}}>
+      <G t={t}/>
+
+      {/* HEADER */}
+      <div style={{padding:"14px 32px",borderBottom:`1px solid ${t.headerBdr}`,background:t.headerBg,display:"flex",justifyContent:"space-between",alignItems:"center",transition:"background 0.3s"}}>
+        <div>
+          <div style={{fontSize:9,color:t.accentBlue,letterSpacing:"0.22em",textTransform:"uppercase",marginBottom:3}}>Central Coalfields Limited · Argada Sub-Area</div>
+          <div style={{fontSize:20,fontWeight:800,color:t.titleColor,letterSpacing:"-0.02em"}}>
+            L&R <span style={{color:"#3b82f6"}}>Argada Area</span>
+            <span style={{color:t.subColor,fontWeight:400,fontSize:13,marginLeft:10}}>Intelligence Dashboard</span>
           </div>
         </div>
-
-        <div style={{height:32}}/>
+        {/* LIVE CLOCK */}
+        <LiveClock t={t}/>
       </div>
 
-      {/* ── MODALS ── */}
-      {acqModal   && <AcqModal   mine={acqModal.mine}  data={acqModal.data}  onClose={()=>setAcqModal(null)}/>}
-      {posModal   && <PosModal   mine={posModal.mine}  data={posModal.data}  onClose={()=>setPosModal(null)}/>}
-      {eofModal   && <EofficeModal file={eofModal}                           onClose={()=>setEofModal(null)}/>}
-      {houseModal && <HouseModal  data={houseModal}                          onClose={()=>setHouseModal(null)}/>}
+      {/* CIRCLES */}
+      <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:"20px 40px"}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:"28px",width:"100%",maxWidth:1140}}>
+          {CARDS.map(c=>(
+            <Circle key={c.key} icon={c.icon} label={c.label} value={c.value}
+              sub={c.sub} color={c.color} alert={c.alert} onClick={()=>setOpen(c.key)} t={t}/>
+          ))}
+        </div>
+      </div>
+
+      {/* PANELS */}
+      {open==="acq"   && <AcqPanel/>}
+      {open==="pos"   && <PosPanel/>}
+      {open==="rti"   && <RtiPanel/>}
+      {open==="house" && <HousePanel/>}
+      {open==="eof"   && <EofficePanel/>}
+      {open==="legal" && <LegalPanel/>}
+
+      {/* 🌙 DARK / LIGHT TOGGLE */}
+      <button className="toggle-btn" onClick={()=>setDark(d=>!d)}>
+        <span style={{fontSize:16}}>{t.toggleIcon}</span>
+        <span>{t.toggleLabel}</span>
+      </button>
+
+      {/* 📅 CALENDAR */}
+      <CalendarWidget t={t} sheetEvents={data?.events||[]}/>
     </div>
   );
 }
